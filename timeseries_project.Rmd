@@ -1,0 +1,282 @@
+---
+title: "Time Series: Yearly Electricity Consumption (US), 1920 - 1970"
+author: "Phillip Kim"
+date: "Project Date: November 2017 - December 2017"
+output: 
+  pdf_document: 
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE)
+```
+
+```{r pkgs, warning = FALSE, echo = FALSE, include = FALSE}
+library(qpcR)
+library(GeneCycle)
+```
+
+```{r global_options, include = FALSE}
+library(knitr)
+opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+```
+$\textbf{Executive Summary}$  
+Currently, the United States stand in second place in the ranking of countries that have the highest yearly electric energy consumption (in units of kilowatts multiplied by hour per year), consuming a total of 3,913,000,000,000 kW · h/yr as of 2014. In this time series project, we will be able to witness whether the data for electric energy consumption for 2014 is within the confidence interval of the forecasted data points. Some time series techniques that will be used to analyze this are the following: box-cox transformation, differencing, model-fitting, diagnostic checking, forecasting, and spectral analysis.
+
+$\textbf{Original Data}$  
+Here is the graph of the time series data:
+
+```{r}
+setwd("/Users/pureInfinitas/Documents/School/Fall 2017/PSTAT 174/untitled folder")
+elec = read.csv("total-electricity-consumption-us.csv", header = TRUE)
+elect = ts(elec[,2])
+elec2 = read.csv("estimate_total_elec_consume.csv", header = FALSE)
+elect2 = ts(elec2[,5])
+ts.plot(elect, ylab = "kilowatt-hours(millions)", xlab = "Time (years)", main = "Electricity Consumption(US)")
+```
+Using the var( ) function in R, we find that the variance of this time series is: 198484636051. From figure 1, we can see that there is a clear positive trend; however, there is no seasonality. The trend doesn’t appear to be linear and looks more likely to be an exponential trend. Because of this exponential trend, the variance of the time series seems to increase as time passes. Therefore, it would be necessary to use the Box-Cox transformation to stabilize the variance of the time series. Differencing at lag 1 would also improve the stationarity of the time series.
+
+$\textbf{Data Transformation}$  
+$\underline{\text{Box-Cox Transformation}}$
+
+We now proceed to use the Box-Cox Transformation.
+
+```{r}
+require(MASS)
+bcElec <- boxcox(elect~as.numeric(1:length(elect)))
+optimalLambda <- bcElec$x[which(bcElec$y == max(bcElec$y))] 
+optimalLambda
+```
+From the above figure, we observe that although the optimal λ to use for the box-cox transformation is -0.06060606, because this value is less than 0 and 0 is within the 95% confidence interval of the log-likelihood plot, we use the following transformation: fλ(Ut) = ln Ut, where Ut represents our original data. Therefore, we obtain the following time series:
+
+```{r}
+elect_bc = log(elect)
+ts.plot(elect_bc, main = "Box-Cox transformed data", ylab = "kilowatt-hours(millions)", xlab = "Time (years)")
+var(elect_bc)
+```
+Using the var( ) function in R, we find that the variance of this time series is: 1.045185, therefore stabilizing the variance of the time series. We also observe that the trend of the time series data has become more linear than exponential due to the box-cox transformation. Because we would want to remove a linear trend, we proceed by differencing the time series once at lag 1.
+
+```{r}
+elect_diff1 = diff(elect_bc, 1)
+plot(elect_diff1, main = "Detrended Time Series", ylab = "killowatt-hours(millions)", xlab = "Time (years)")
+var(elect_diff1)
+```
+From the above, we observe that there no longer exists a trend and there is barely any presence of seasonality. The variance of this time series plot is: 0.003092171. For the purpose of experimenting, I decide to difference the time series once again at lag 1 to be sure that I have the optimal transformed data:
+```{r}
+elect_diff1_2 = diff(elect_diff1, 1)
+plot(elect_diff1_2, main = "Detrended Time Series (Twice)", ylab = "killowatt-hours(millions)", xlab = "Time (years)")
+var(elect_diff1_2)
+```
+From the above figure, we observe that there appears to be a stronger presence of seasonality than before; however, we also take into account the increase in variance of this time series data, in which after differencing at lag 1 twice, we obtain a variance of: 0.004274764. Therefore, we conclude that differencing the time series at lag 1 only once provides us with the optimal transformed data.
+
+$\textbf{Model Building}$  
+$\underline{\text{ACF and PACF speculation}}$
+
+We now plot the ACF and PACF graphs of the transformed data:
+```{r}
+op = par(mfrow = c(1, 2))
+acf(elect_diff1, lag.max = 100)
+pacf(elect_diff1, lag.max = 100)
+title("De-trended Time Series", line = -1, outer = TRUE)
+```
+From the above figures, I speculate that the model is: ARIMA(9, 0, 9).
+
+$\underline{\text{Comparisons}}$
+The next step is to compare various ARIMA(p, 0, q) models for p : 0 ≤ p ≤ 9 and q : 0 ≤ q ≤ 9 using the AICc. We therefore work towards building a total of 100 models and comparing 100 AICc values. Using a for loop in R and the AICc( ) function, we obtain the following AICc matrix:
+
+```{r}
+aiccs <- matrix(NA, nr = 10, nc = 10)
+dimnames(aiccs) = list(p=0:9, q=0:9)
+for (p in 0:9) {
+  for (q in 0:9) {
+    aiccs[p+1, q+1] = AICc(arima(elect_diff1, order = c(p,0,q), method = "ML", optim.control = list(maxit = 500)))
+    }
+}
+
+aiccs
+```
+It should be noted that p corresponds to the indices of the rows of the matrix while q corresponds to the indices of the columns of the matrix. Using the which( ) function, we determine the entry of the matrix which contains the minimal AICc, which would be in the first row and second column of the aiccs matrix. Because we would want to use AICc as our main method of selecting a model, we therefore adopt the ARIMA(0, 0, 1) model,
+which differs from our speculation of the ARIMA(9, 0, 9) model.
+```{r}
+which(aiccs == min(aiccs), arr.ind = TRUE)
+```
+```{r}
+arima(elect_diff1, order = c(0, 0, 1), method = "ML")
+```
+Using the arima( ) function, we obtain the following ARIMA(0, 0, 1) model: $X_t = Z_t + 0.4016Z_{t−1} + 0.0659$. 
+
+$\underline{\text{Diagnostics Check}}$  
+Now we perform diagnostic checking on the fitted model residuals:
+
+```{r}
+fit = arima(elect_diff1, order = c(0, 0, 1), method = "ML")
+Box.test(residuals(fit), type="Ljung")
+shapiro.test(residuals(fit))
+```
+From the Box-Ljung test, we find that the p-value is greater than 0.05, which means that the residuals are independent on each other. We also see that from the Shapiro-Wilk normality test, the p-value is greater than 0.05, which means that the residuals are approximately IID Gaussian. Now, we plot the residuals:
+```{r}
+ts.plot(residuals(fit), main = "Fitted Residuals")
+
+par(mfrow=c(1,2),oma=c(0,0,2,0))
+# Plot diagnostics of residuals
+op <- par(mfrow=c(2,2))
+# acf
+acf(residuals(fit),main = "Autocorrelation")
+# pacf
+pacf(residuals(fit),main = "Partial Autocorrelation")
+# Histogram
+hist(residuals(fit),main = "Histogram")
+# q-q plot
+qqnorm(residuals(fit))
+qqline(residuals(fit),col ="blue")
+title("Fitted Residuals Diagnostics", outer=TRUE)
+par(op)
+```
+Although we use AICc as our prime criterion for choosing the best model, I decide to use another model, the model we have currently contains only MA components, and without the presence of AR components, we wouldn't be able to take into account for the increase in total electricity consumption over time. Originally, I had decided to use a model which has the second minimum AICc, and found this model using the which( ) function. I had found that this model is the following: ARIMA(0, 0, 5). However, because this model doesn’t take into account increase in total electricity consumption, it is necessary to attach an AR component to my ARIMA model. Therefore, in efforts to minimize AICc, we decide to use an ARIMA(1, 0, 2) model, which reduces the number of parameters used. Using the arima( ) function, we obtain the following ARIMA(1, 0, 2) model:
+```{r}
+fit2 = arima(elect_diff1, order = c(1, 0, 2), method = "ML")
+fit2
+```
+Our model is the following: $X_t - 0.8042X_{t-1} = Z_t - 0.5456Z_{t-1} - 0.4544Z_{t-2} + 0.0674$
+```{r}
+fit2 = arima(elect_diff1, order = c(1, 0, 2), method = "ML")
+Box.test(residuals(fit2), type="Ljung")
+shapiro.test(residuals(fit2))
+```
+The p-value for the Box-Ljung test and Shapiro-Wilk normality test are both greater than 0.05, which implies that the residuals are independent from each other and are also IID Gaussian. The data is therefore normal and we adopt our ARIMA(1, 0, 2) model to be our optimal model.
+```{r}
+ts.plot(residuals(fit2), main = "Fitted Residuals")
+
+par(mfrow=c(1,2),oma=c(0,0,2,0))
+# Plot diagnostics of residuals
+op <- par(mfrow=c(2,2))
+# acf
+acf(residuals(fit2),main = "Autocorrelation")
+# pacf
+pacf(residuals(fit2),main = "Partial Autocorrelation")
+# Histogram
+hist(residuals(fit2),main = "Histogram")
+# q-q plot
+qqnorm(residuals(fit2))
+qqline(residuals(fit2),col ="blue")
+title("Fitted Residuals Diagnostics", outer=TRUE)
+par(op)
+```
+
+$\textbf{Forecasting}$  
+Given our ARMA model, we use the predict( ) function to forecast the next 44 data points, which represent 44 years worth of total electricity consumption in the US.The below, predictions, however, are based on predictions of our transformed time series.
+```{r}
+mypred <- predict(fit2, n.ahead=44)
+ts.plot(elect_diff1, xlim=c(0,95), ylim = c(-0.20, 0.21))
+points(52:95,mypred$pred)
+lines(52:95,mypred$pred+1.96*mypred$se,lty=2)
+lines(52:95,mypred$pred-1.96*mypred$se,lty=2)
+```
+The below code and results takes into account the predictions and standard deviations of the differences of the transformed time series, and transforms both the original differences plus the prediction of the differences back into the original form of the data. We make use of the standard deviation of the differences to create 95% confidence intervals of the predictions as well. 
+```{r}
+first_actual <- elect_bc[1]
+first_actual2 <- elect_bc[1]
+first_actual3 <- elect_bc[1]
+bc_vec <- c(first_actual)
+differences_vec <- c(elect_diff1, mypred$pred)
+for (i in 1:length(differences_vec)) {
+  first_actual <- first_actual + differences_vec[i]
+  bc_vec <- c(bc_vec, first_actual)
+}
+
+bc_vec_upper <- c(first_actual2)
+bc_vec_lower <- c(first_actual3)
+mypred_upper <- mypred$pred+1.96*mypred$se
+mypred_lower <- mypred$pred-1.96*mypred$se
+differences_vec_upper <- c(elect_diff1, mypred_upper)
+differences_vec_lower <- c(elect_diff1, mypred_lower)
+for (i in 1:length(differences_vec)) {
+  first_actual2 <- first_actual2 + differences_vec_upper[i]
+  bc_vec_upper <- c(bc_vec_upper, first_actual2)
+  first_actual3 <- first_actual3 + differences_vec_lower[i]
+  bc_vec_lower <- c(bc_vec_lower, first_actual3)
+}
+
+bc_vec_exp <- exp(bc_vec)
+bc_vec_upper_exp <- exp(bc_vec_upper)
+bc_vec_lower_exp <- exp(bc_vec_lower)
+
+ts.plot(elect, xlim = c(0, 95), ylim = c(0, 35000000))
+points(52:95, bc_vec_exp[52:95])
+lines(52:95, bc_vec_upper_exp[52:95], lty = 2)
+lines(52:95, bc_vec_lower_exp[52:95], lty = 2)
+```
+I was unable to find data which directly states annual total electricity consumption from 1971 - 2014. There was data on annual electricity consumption per capita, however, and so making use of data on US population (annual), we can obtain approximate data for total electricity consumption from 1971 - 2014 (annually). We therefore have the following figure:
+
+```{r}
+ts.plot(elect, xlim = c(0, 95), ylim = c(0, 35000000))
+points(52:95, bc_vec_exp[52:95])
+lines(52:95, bc_vec_upper_exp[52:95], lty = 2)
+lines(52:95, bc_vec_lower_exp[52:95], lty = 2)
+points(52:95, elect2[52:95], col = "red")
+```
+We take a more in-depth look into the confidence intervals of electricity consumption in the US from 1971 - 2014.
+```{r}
+for (i in 52:95) {
+  print(c(bc_vec_lower_exp[i], bc_vec_upper_exp[i]))
+}
+```
+Now we take a look at the estimated total electricity consumption in the US from 1971 - 2014:
+```{r}
+for (i in 52:95) {
+  print(elect2[i])
+}
+
+```
+We now verify to see at which points the actual (or rather estimated) data lies within the confidence interval or not.
+
+```{r}
+true_lie_within <- c()
+for (i in 52:95) {
+  if ((elect2[i] > bc_vec_lower_exp[i]) & (elect2[i] < bc_vec_upper_exp[i])) {
+    true_lie_within <- c(true_lie_within, TRUE) 
+    } else {
+      true_lie_within <- c(true_lie_within, FALSE)
+    }
+}
+true_lie_within
+```
+We can see from above that the estimated total electricity consumption in only 1971 does not lie within the confidence interval; however, the rest of the 43 estimated points lie within their respective confidence intervals, including the estimated 44th point (actual total electricity consumption for 2014). 
+
+$\textbf{Spectral Analysis}$  
+Using the periodogram( ) function, we obtain the following periodogram:
+```{r}
+periodogram_elect <- periodogram(elect)
+plot(periodogram_elect$freq, periodogram_elect$spec, xlab = "Frequency", ylab = "Periodogram", type = "h")
+```
+The following are the estimated frequencies:
+```{r}
+periodogram(elect)$freq
+```
+We now perform the Fisher test:
+```{r}
+fisher.g.test(elect)
+```
+Using the fisher.g.test( ) function, we obtain a p-value of 2.68546e-08, which is less than 0.05. Therefore, our original data set does not pass Fisher’s test for Gaussian White Noise, and so our data set is not Gaussian White Noise.
+
+
+We now perform the Kolmogorov-Smirnov Test, in which we are checking as to whether the residuals are Gaussian White Noise. Using the cpgram( ) function, we obtain the following plot:
+```{r}
+cpgram(residuals(fit2))
+```
+From the above graph, we can see that our function, outlined in black, does not exit the blue- dotted line boundaries, which means we do not reject the hypothesis that the residuals follow the Gaussian white noise model.
+
+$\textbf{Conclusion}$  
+My final model of the transformed data is: $X_t - 0.8042X_{t-1} = Z_t - 0.5456Z_{t-1} - 0.4544Z_{t-2} + 0.0674$. Although I was able to find a model taking into consideration AICc and diagnostic check, we also had to take into consideration the increasing trend in total electricity consumption as time passes. Therefore, my new model takes into account the increase in total electric consumption as time passes as evident in the data of my estimations in years 1971 - 2014. In addition, my model satisfies the Box-Ljung test, Shapiro-Walk Normality test, and Kolmogorov-Smirnov Test. My model also has one of the lowest AICc value when comparing 99 other possible models.
+
+I thank my TA, Nhan Huynh, and my colleague, Syen Yang Lu, for assisting me with this project.
+
+$\textbf{References}$  
+https://datamarket.com/data/set/22vi/total-electricity-consumption-us-kilowatt-hours-millions- 1920-1970#!ds=22vi&display=line
+
+https://data.worldbank.org/indicator/EG.USE.ELEC.KH.PC
+
+https://fred.stlouisfed.org/series/POPTOTUSA647NWDB
+
+
+
